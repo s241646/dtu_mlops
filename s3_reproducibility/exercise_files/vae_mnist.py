@@ -4,7 +4,9 @@ A simple implementation of Gaussian MLP Encoder and Decoder trained on MNIST
 """
 
 import os
+import logging
 
+import hydra
 import torch
 import torch.nn as nn
 import torchvision.transforms as transforms
@@ -13,82 +15,97 @@ from torch.optim import Adam
 from torch.utils.data import DataLoader
 from torchvision.datasets import MNIST
 from torchvision.utils import save_image
-
-# Model Hyperparameters
-dataset_path = "~/datasets"
-cuda = torch.cuda.is_available()
-DEVICE = torch.device("cuda" if cuda else "cpu")
-batch_size = 100
-x_dim = 784
-hidden_dim = 400
-
-# Data loading
-mnist_transform = transforms.Compose([transforms.ToTensor()])
-
-train_dataset = MNIST(dataset_path, transform=mnist_transform, train=True, download=True)
-test_dataset = MNIST(dataset_path, transform=mnist_transform, train=False, download=True)
-
-train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
-test_loader = DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False)
-
-encoder = Encoder(input_dim=x_dim, hidden_dim=hidden_dim, latent_dim=20)
-decoder = Decoder(latent_dim=20, hidden_dim=hidden_dim, output_dim=x_dim)
-
-model = Model(encoder=encoder, decoder=decoder).to(DEVICE)
+from omegaconf import OmegaConf
 
 
-def loss_function(x, x_hat, mean, log_var):
-    """Elbo loss function."""
-    reproduction_loss = nn.functional.binary_cross_entropy(x_hat, x, reduction="sum")
-    kld = -0.5 * torch.sum(1 + log_var - mean.pow(2) - log_var.exp())
-    return reproduction_loss + kld
+# hyperparameters now in config.yaml
+# dataset_path = "~/datasets"
+# batch_size = 100
+# x_dim = 784
+# hidden_dim = 400
+# latent_dim = 20
+# epochs = range(20)
+
+log = logging.getLogger(__name__)
+
+@hydra.main(config_path="config", config_name="default_config.yaml")
+def train(config) -> None:
+    """Train VAE on MNIST."""
+    print(f"configuration: \n {OmegaConf.to_yaml(config)}")
+    hparams = config.experiment
+    torch.manual_seed(hparams["seed"])
+    cuda = torch.cuda.is_available()
+    DEVICE = torch.device("cuda" if cuda else "cpu")
+
+    # Data loading
+    mnist_transform = transforms.Compose([transforms.ToTensor()])
+
+    train_dataset = MNIST(hparams["dataset_path"], transform=mnist_transform, train=True, download=True)
+    test_dataset = MNIST(hparams["dataset_path"], transform=mnist_transform, train=False, download=True)
+
+    train_loader = DataLoader(dataset=train_dataset, batch_size=hparams["batch_size"], shuffle=True)
+    test_loader = DataLoader(dataset=test_dataset, batch_size=hparams["batch_size"], shuffle=False)
+    
+    encoder = Encoder(input_dim=hparams["x_dim"], hidden_dim=hparams["hidden_dim"], latent_dim=hparams["latent_dim"])
+    decoder = Decoder(latent_dim=hparams["latent_dim"], hidden_dim=hparams["hidden_dim"], output_dim=hparams["x_dim"])
+
+    model = Model(encoder=encoder, decoder=decoder).to(DEVICE)
 
 
-optimizer = Adam(model.parameters(), lr=1e-3)
+    def loss_function(x, x_hat, mean, log_var):
+        """Elbo loss function."""
+        reproduction_loss = nn.functional.binary_cross_entropy(x_hat, x, reduction="sum")
+        kld = -0.5 * torch.sum(1 + log_var - mean.pow(2) - log_var.exp())
+        return reproduction_loss + kld
 
 
-print("Start training VAE...")
-model.train()
-for epoch in range(20):
-    overall_loss = 0
-    for batch_idx, (x, _) in enumerate(train_loader):
-        if batch_idx % 100 == 0:
-            print(batch_idx)
-        x = x.view(batch_size, x_dim)
-        x = x.to(DEVICE)
+    optimizer = Adam(model.parameters(), lr=hparams["lr"])
 
-        optimizer.zero_grad()
+    log.info("Start training VAE...")
+    model.train()
+    for epoch in range(hparams["n_epochs"]):
+        overall_loss = 0
+        for batch_idx, (x, _) in enumerate(train_loader):
+            if batch_idx % 100 == 0:
+                print(batch_idx)
+            x = x.view(hparams["batch_size"], hparams["x_dim"])
+            x = x.to(DEVICE)
 
-        x_hat, mean, log_var = model(x)
-        loss = loss_function(x, x_hat, mean, log_var)
+            optimizer.zero_grad()
 
-        overall_loss += loss.item()
+            x_hat, mean, log_var = model(x)
+            loss = loss_function(x, x_hat, mean, log_var)
 
-        loss.backward()
-        optimizer.step()
-    print(f"Epoch {epoch + 1} complete!,  Average Loss: {overall_loss / (batch_idx * batch_size)}")
-print("Finish!!")
+            overall_loss += loss.item()
 
-# save weights
-torch.save(model, f"{os.getcwd()}/trained_model.pt")
+            loss.backward()
+            optimizer.step()
+        log.info(f"Epoch {epoch + 1} complete!,  Average Loss: {overall_loss / (batch_idx * hparams['batch_size'])}")
+    log.info("Finish!!")
 
-# Generate reconstructions
-model.eval()
-with torch.no_grad():
-    for batch_idx, (x, _) in enumerate(test_loader):
-        if batch_idx % 100 == 0:
-            print(batch_idx)
-        x = x.view(batch_size, x_dim)
-        x = x.to(DEVICE)
-        x_hat, _, _ = model(x)
-        break
+    # save weights
+    torch.save(model, f"{os.getcwd()}/trained_model.pt")
 
-save_image(x.view(batch_size, 1, 28, 28), "orig_data.png")
-save_image(x_hat.view(batch_size, 1, 28, 28), "reconstructions.png")
+    # Generate reconstructions
+    model.eval()
+    with torch.no_grad():
+        for batch_idx, (x, _) in enumerate(test_loader):
+            if batch_idx % 100 == 0:
+                print(batch_idx)
+            x = x.view(hparams["batch_size"], hparams["x_dim"])
+            x = x.to(DEVICE)
+            x_hat, _, _ = model(x)
+            break
 
-# Generate samples
-with torch.no_grad():
-    noise = torch.randn(batch_size, 20).to(DEVICE)
-    generated_images = decoder(noise)
+    save_image(x.view(hparams["batch_size"], 1, 28, 28), "orig_data.png")
+    save_image(x_hat.view(hparams["batch_size"], 1, 28, 28), "reconstructions.png")
 
-save_image(generated_images.view(batch_size, 1, 28, 28), "generated_sample.png")
+    # Generate samples
+    with torch.no_grad():
+        noise = torch.randn(hparams["batch_size"], 20).to(DEVICE)
+        generated_images = decoder(noise)
+
+    save_image(generated_images.view(hparams["batch_size"], 1, 28, 28), "generated_sample.png")
+
+if __name__ == "__main__":
+    train()

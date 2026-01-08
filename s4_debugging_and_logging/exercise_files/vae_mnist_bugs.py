@@ -11,9 +11,12 @@ from torch.utils.data import DataLoader
 from torchvision.datasets import MNIST
 from torchvision.utils import save_image
 
+import pdb
+pdb.set_trace()
+
 # Model Hyperparameters
 dataset_path = "datasets"
-cuda = True
+cuda = torch.cuda.is_available()
 DEVICE = torch.device("cuda" if cuda else "cpu")
 batch_size = 100
 x_dim = 784
@@ -54,7 +57,10 @@ class Encoder(nn.Module):
 
     def reparameterization(self, mean, var):
         """Reparameterization trick to sample z values."""
-        epsilon = torch.randn(*var.shape)
+        # epsilon = torch.randn(*var.shape) # epsilon on cpu
+        # var and epsilon should be on the same device
+        # epsilon was on cpu, var and mean on gpu (if running fwd pass on gpu)
+        epsilon = torch.randn(*var.shape, device=var.device)
         return mean + var * epsilon
 
 
@@ -92,6 +98,7 @@ encoder = Encoder(input_dim=x_dim, hidden_dim=hidden_dim, latent_dim=latent_dim)
 decoder = Decoder(latent_dim=latent_dim, hidden_dim=hidden_dim, output_dim=x_dim)
 
 model = Model(encoder=encoder, decoder=decoder).to(DEVICE)
+# AssertionError: Torch not compiled with CUDA enabled
 
 BCE_loss = nn.BCELoss()
 
