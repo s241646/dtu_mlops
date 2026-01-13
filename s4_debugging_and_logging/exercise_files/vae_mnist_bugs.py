@@ -35,7 +35,6 @@ test_dataset = MNIST(dataset_path, transform=mnist_transform, train=False, downl
 train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
 test_loader = DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False)
 
-
 class Encoder(nn.Module):
     """Gaussian MLP Encoder."""
 
@@ -51,8 +50,10 @@ class Encoder(nn.Module):
         """Forward pass of the encoder module."""
         h_ = torch.relu(self.FC_input(x))
         mean = self.FC_mean(h_)
-        log_var = self.FC_var(h_)
-        z = self.reparameterization(mean, log_var)
+        log_var = self.FC_var(h_) # actually std
+        # z = self.reparameterization(mean, log_var)
+        # Bug: should pass stddev (exp(log_var)) not log_var directly
+        z = self.reparameterization(mean, torch.exp(log_var))
         return z, mean, log_var
 
     def reparameterization(self, mean, var):
@@ -70,7 +71,9 @@ class Decoder(nn.Module):
     def __init__(self, latent_dim, hidden_dim, output_dim) -> None:
         super().__init__()
         self.FC_hidden = nn.Linear(latent_dim, hidden_dim)
-        self.FC_output = nn.Linear(latent_dim, output_dim)
+        # self.FC_output = nn.Linear(latent_dim, output_dim)
+        # input dim mismatch bug fixed
+        self.FC_output = nn.Linear(hidden_dim, output_dim)
 
     def forward(self, x):
         """Forward pass of the decoder module."""
@@ -117,6 +120,8 @@ model.train()
 for epoch in range(epochs):
     overall_loss = 0
     for batch_idx, (x, _) in enumerate(train_loader):
+        # Zero gradients
+        optimizer.zero_grad()
         if batch_idx % 100 == 0:
             print(batch_idx)
         x = x.view(batch_size, x_dim)

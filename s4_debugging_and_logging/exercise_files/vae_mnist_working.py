@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import torchvision.transforms as transforms
 from torch.optim import Adam
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, TensorDataset
 from torchvision.datasets import MNIST
 from torchvision.utils import save_image
 
@@ -26,8 +26,15 @@ epochs = 5
 # Data loading
 mnist_transform = transforms.Compose([transforms.ToTensor()])
 
-train_dataset = MNIST(dataset_path, transform=mnist_transform, train=True, download=True)
-test_dataset = MNIST(dataset_path, transform=mnist_transform, train=False, download=True)
+# train_dataset = MNIST(dataset_path, transform=mnist_transform, train=True, download=True)
+# test_dataset = MNIST(dataset_path, transform=mnist_transform, train=False, download=True)
+
+# don't transform - already have tensors
+# the class also internally normalize to [0,1] domain so we need to divide by 255
+train_dataset = MNIST(dataset_path, train=True, download=True)
+train_dataset = TensorDataset(train_dataset.data.float() / 255.0, train_dataset.targets)
+test_dataset = MNIST(dataset_path, train=False, download=True)
+test_dataset = TensorDataset(test_dataset.data.float() / 255.0, test_dataset.targets)
 
 train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
 test_loader = DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False)
@@ -137,6 +144,10 @@ for epoch in range(epochs):
         overall_loss / (batch_idx * batch_size),
     )
 print("Finish!!")
+
+# Save the trained model
+torch.save(model.state_dict(), 'vae_model.pth')
+print("Model saved to vae_model.pth")
 
 # Generate reconstructions
 model.eval()

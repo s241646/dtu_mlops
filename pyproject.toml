@@ -27,6 +27,8 @@ dependencies = [
   "pre-commit>=4.1",
   "pymdown-extensions>=10.14.3",
   "ruff>=0.14.5",
+  "torch-tb-profiler>=0.4.3",
+  "wandb>=0.23.0",
 ]
 
 [dependency-groups]
